@@ -1,12 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	toml "github.com/pelletier/go-toml"
 	"github.com/pkg/errors"
@@ -49,11 +49,31 @@ func loadUpdateURL() (string, error) {
 	return updateURL, nil
 }
 
-func externalIP() (string, error) {
-	resp, err := http.Get("https://api.ipify.org/")
+func externalAddr() (string, error) {
+	addr, err := httpGET("https://api.ipify.org/")
+	if err != nil {
+		return "", errors.Wrap(err, "ipify API failed")
+	}
+	return addr, nil
+}
+
+func updateEntry(updateURL, addr string) error {
+	body, err := httpGET(updateURL + addr)
+	if err != nil {
+		return errors.Wrap(err, "update failed")
+	}
+	if !strings.Contains(body, "success") {
+		return errors.Errorf("update failed: %s", body)
+	}
+	return nil
+}
+
+func httpGET(url string) (string, error) {
+	resp, err := http.Get(url)
 	if err != nil {
 		return "", errors.Wrap(err, "GET failed")
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", errors.Errorf("GET failed with %d", resp.StatusCode)
@@ -63,29 +83,7 @@ func externalIP() (string, error) {
 	if err != nil {
 		return "", errors.Wrap(err, "body read failed")
 	}
-
 	return string(body), nil
-}
-
-func updateEntry(updateURL, addr string) error {
-	resp, err := http.Get(updateURL + addr)
-	if err != nil {
-		return errors.Wrap(err, "update failed")
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return errors.Errorf("update failed with %d", resp.StatusCode)
-	}
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return errors.Wrap(err, "body read failed")
-	}
-
-	if !bytes.Contains(body, []byte("success")) {
-		return errors.Errorf("update failed: %s", body)
-	}
-	return nil
 }
 
 func main() {
@@ -97,12 +95,11 @@ func main() {
 		return
 	}
 
-	addr, err := externalIP()
+	addr, err := externalAddr()
 	if err != nil {
 		log.Printf("failed to retrieve external ip: %v", err)
 		return
 	}
-
 	log.Printf("external address: %s", addr)
 
 	if err := updateEntry(updateURL, addr); err != nil {
